@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+.env.production
+.env.staging
+!.env.example
+
+# Build
+dist/
+.next/
+.turbo/
+build/
+*.egg-info/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Certificates
+certbot/
+*.pem
+*.key
+*.crt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes (local)
+pgdata/
+redisdata/
+miniodata/
+
+# Test output
+coverage/
+.pytest_cache/
+htmlcov/
+playwright-report/
+test-results/
