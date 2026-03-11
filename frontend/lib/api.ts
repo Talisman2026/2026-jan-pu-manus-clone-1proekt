@@ -7,7 +7,8 @@ import type {
   RunTaskRequest,
 } from './types'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Empty string = relative URL → requests go through Next.js rewrites → proxied to backend
+const API_BASE = ''
 
 class ApiError extends Error {
   constructor(
