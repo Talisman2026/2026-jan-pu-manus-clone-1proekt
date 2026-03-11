@@ -310,11 +310,15 @@ def execute_write_file(args: dict) -> str:
     return f"Saved to {path}"
 
 
-def execute_tool(tool_name: str, args: dict, firecrawl: FirecrawlApp) -> str:
+def execute_tool(tool_name: str, args: dict, firecrawl: "FirecrawlApp | None") -> str:
     """Dispatch to the correct tool implementation."""
     if tool_name == "web_search":
+        if firecrawl is None:
+            return json.dumps({"error": "web_search unavailable: FIRECRAWL_API_KEY not configured. Try completing the task without web search."})
         return execute_web_search(args, firecrawl)
     if tool_name == "scrape_url":
+        if firecrawl is None:
+            return "scrape_url unavailable: FIRECRAWL_API_KEY not configured. Try completing the task without scraping."
         return execute_scrape_url(args, firecrawl)
     if tool_name == "run_python":
         return execute_run_python(args)
@@ -419,14 +423,18 @@ def save_partial_results(messages: list[dict], total_cost: float, reason: str) -
 # ---------------------------------------------------------------------------
 
 
-def build_system_prompt(budget_cap: float) -> str:
+def build_system_prompt(budget_cap: float, web_tools_available: bool = True) -> str:
+    web_note = (
+        "Be thorough but efficient. If web_search returns results, use scrape_url on promising pages for deeper content."
+        if web_tools_available
+        else "NOTE: web_search and scrape_url are unavailable in this environment. Complete the task using run_python and write_file only."
+    )
     return (
         "You are an autonomous research agent. Complete the given task fully and thoroughly.\n"
         f"Budget cap: ${budget_cap:.2f}. You MUST stop if approaching the limit.\n"
         "Always save your final result using write_file before calling finish.\n"
         "Save files to /home/user/results/ directory.\n"
-        "Be thorough but efficient. If web_search returns results, use scrape_url on promising "
-        "pages for deeper content."
+        f"{web_note}"
     )
 
 
@@ -438,17 +446,21 @@ def main(task_description: str, budget_cap: float, task_id: str) -> None:
     if not openai_api_key:
         emit(ErrorEvent(message="OPENAI_API_KEY is not set", cost_usd=0.0))
         sys.exit(1)
-    if not firecrawl_api_key:
-        emit(StatusEvent(message="FIRECRAWL_API_KEY is not set — web tools will fail"))
+
+    # Firecrawl is optional — without it, web_search and scrape_url return
+    # a clear error message to the LLM which can then try to proceed without them.
+    firecrawl_available = bool(firecrawl_api_key and not firecrawl_api_key.startswith("fc-dummy"))
+    if not firecrawl_available:
+        emit(StatusEvent(message="FIRECRAWL_API_KEY not configured — web search tools unavailable"))
 
     client = OpenAI(api_key=openai_api_key)
-    firecrawl = FirecrawlApp(api_key=firecrawl_api_key)
+    firecrawl = FirecrawlApp(api_key=firecrawl_api_key) if firecrawl_available else None
 
     # --- Conversation state ---
     messages: list[Any] = [
         {
             "role": "system",
-            "content": build_system_prompt(budget_cap),
+            "content": build_system_prompt(budget_cap, web_tools_available=firecrawl_available),
         },
         {
             "role": "user",
