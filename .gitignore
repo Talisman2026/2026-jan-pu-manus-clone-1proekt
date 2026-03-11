@@ -26,11 +26,16 @@ build/
 logs/
 npm-debug.log*
 
-# Certificates
+# Certificates & SSL
 certbot/
 *.pem
 *.key
 *.crt
+infra/nginx/ssl/
+
+# Task result files (generated at runtime)
+results/
+backend/results/
 
 # OS
 .DS_Store
