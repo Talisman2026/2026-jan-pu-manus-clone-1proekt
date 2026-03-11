@@ -17,6 +17,7 @@ SECURITY:
 import json
 import logging
 import os
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
+from database import AsyncSessionLocal
 from models import Task, TaskStep
 from security import sanitize
 
@@ -53,46 +55,48 @@ async def run_task_in_sandbox(
     description: str,
     budget_cap: float,
     user_openai_key: str,
-    db: AsyncSession,
 ) -> None:
     """Execute *task_id* inside an E2B sandbox.
 
     This function is meant to be called as a FastAPI BackgroundTask.
-    It updates the Task and TaskStep rows throughout execution.
+    It creates its OWN DB session (not the request-scoped one which is
+    already closed by the time this runs) and updates the Task/TaskStep rows.
     """
     sandbox: Optional[AsyncSandbox] = None
 
-    try:
-        sandbox = await _create_sandbox(user_openai_key)
-        # CRITICAL: zero out the key immediately after sandbox creation
-        user_openai_key = None  # noqa: F841 — intentional erasure
+    # Create a fresh DB session for the entire background task lifetime
+    async with AsyncSessionLocal() as db:
+        try:
+            sandbox = await _create_sandbox(user_openai_key)
+            # CRITICAL: zero out the key immediately after sandbox creation
+            user_openai_key = None  # noqa: F841 — intentional erasure
 
-        await _mark_running(task_id, sandbox.sandbox_id, db)
-        await _upload_agent(sandbox)
-        await _install_requirements(sandbox)
-        await _run_agent(task_id, description, budget_cap, sandbox, db)
-        await _download_result(task_id, sandbox, db)
+            await _mark_running(task_id, sandbox.sandbox_id, db)
+            await _upload_agent(sandbox)
+            await _install_requirements(sandbox)
+            await _run_agent(task_id, description, budget_cap, sandbox, db)
+            await _download_result(task_id, sandbox, db)
 
-    except SandboxException as exc:
-        sanitized = sanitize(str(exc))
-        logger.error("Sandbox error for task_id=%s: %s", task_id, sanitized)
-        await _mark_failed(task_id, db)
+        except SandboxException as exc:
+            sanitized = sanitize(str(exc))
+            logger.error("Sandbox error for task_id=%s: %s", task_id, sanitized)
+            await _mark_failed(task_id, db)
 
-    except Exception as exc:
-        sanitized = sanitize(str(exc))
-        logger.error("Unexpected error for task_id=%s: %s", task_id, sanitized)
-        await _mark_failed(task_id, db)
+        except Exception as exc:
+            sanitized = sanitize(str(exc))
+            logger.error("Unexpected error for task_id=%s: %s", task_id, sanitized)
+            await _mark_failed(task_id, db)
 
-    finally:
-        if sandbox is not None:
-            try:
-                await sandbox.kill()
-            except Exception as kill_exc:
-                logger.warning(
-                    "Failed to kill sandbox for task_id=%s: %s",
-                    task_id,
-                    sanitize(str(kill_exc)),
-                )
+        finally:
+            if sandbox is not None:
+                try:
+                    await sandbox.kill()
+                except Exception as kill_exc:
+                    logger.warning(
+                        "Failed to kill sandbox for task_id=%s: %s",
+                        task_id,
+                        sanitize(str(kill_exc)),
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -171,13 +175,17 @@ async def _run_agent(
     db: AsyncSession,
 ) -> None:
     """Stream agent stdout and process each JSON event line."""
-    # Use shlex-style quoting: description may contain quotes
-    safe_desc = description.replace("'", "'\\''")
+    # Write the task description to a temp file to avoid shell injection.
+    # This is safer than any form of shell-string quoting.
+    task_file = f"{_SANDBOX_HOME}/task_description.txt"
+    await sandbox.files.write(task_file, description)
+
+    # Use shlex.quote for all other arguments; budget and task_id are safe floats/strings
     cmd = (
         f"python {_AGENT_SCRIPT} "
-        f"--task '{safe_desc}' "
+        f"--task-file {shlex.quote(task_file)} "
         f"--budget {budget_cap} "
-        f"--task-id {task_id}"
+        f"--task-id {shlex.quote(task_id)}"
     )
 
     async for line in sandbox.commands.run_stream(cmd, timeout=1800):
@@ -219,8 +227,9 @@ async def _process_event(
         await db.commit()
 
     elif event_type == "budget_warning":
+        # Set status so frontend polling can show the warning banner
         await db.execute(
-            update(Task).where(Task.id == task_id).values(status="running")
+            update(Task).where(Task.id == task_id).values(status="budget_warning")
         )
         await db.commit()
         logger.info("Budget warning for task_id=%s", task_id)

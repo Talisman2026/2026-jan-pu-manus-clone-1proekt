@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback, use } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { isLoggedIn } from '@/lib/auth'
-import { getTask, cancelTask, getTaskResultUrl } from '@/lib/api'
+import { getTask, cancelTask, downloadTaskResult } from '@/lib/api'
 import type { Task, TaskStatus } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/ui/badge'
 import { BudgetBar } from '@/components/budget-bar'
 import { TaskLog } from '@/components/task-log'
 
-const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'paused']
+// budget_warning is quasi-terminal: agent is still running but will auto-stop
+// soon. Keep polling but at a slower interval to show the final state.
+const TERMINAL_STATUSES: TaskStatus[] = ['completed', 'failed', 'paused', 'budget_warning']
 const POLL_INTERVAL_MS = 2000
 
 export default function TaskPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,6 +25,7 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
 
   const isTerminal = task ? TERMINAL_STATUSES.includes(task.status) : false
 
@@ -57,6 +60,23 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
 
     return () => clearInterval(intervalId)
   }, [isTerminal, loading, fetchTask])
+
+  async function handleDownload() {
+    if (!task) return
+    setDownloading(true)
+    try {
+      const blobUrl = await downloadTaskResult(task.id)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `task-${task.id}-result`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   async function handleCancel() {
     if (!task) return
@@ -106,8 +126,7 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
 
   if (!task) return null
 
-  const hasBudgetWarning = task.steps.some((s) => s.tool === 'finish' && task.status === 'budget_warning') ||
-    task.status === 'budget_warning'
+  const hasBudgetWarning = task.status === 'budget_warning'
 
   const isRunning = task.status === 'running' || task.status === 'estimating'
 
@@ -175,9 +194,9 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-3">
           {task.result_file_path && (
-            <a href={getTaskResultUrl(task.id)} download>
-              <Button variant="outline">Download Result</Button>
-            </a>
+            <Button variant="outline" loading={downloading} onClick={handleDownload}>
+              Download Result
+            </Button>
           )}
 
           {isRunning && (

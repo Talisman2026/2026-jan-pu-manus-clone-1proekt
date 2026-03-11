@@ -62,12 +62,6 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleVerifyAndShowMask() {
-    // Just update the UI state to show key exists
-    const exists = await hasKey()
-    setKeyExists(exists)
-  }
-
   async function handleDelete() {
     setStatus('deleting')
     try {

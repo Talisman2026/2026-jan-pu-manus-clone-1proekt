@@ -203,20 +203,15 @@ async def run_task(
     task.status = "running"
     await db.commit()
 
-    # Capture key locally; the background task will zero it after sandbox create
-    openai_key: str = payload.openai_key
-
+    # Pass key to background task; it creates its own DB session and
+    # zeros the key immediately after sandbox creation.
     background_tasks.add_task(
         run_task_in_sandbox,
         task_id=task_id,
         description=task.description,
         budget_cap=payload.budget_cap,
-        user_openai_key=openai_key,
-        db=db,
+        user_openai_key=payload.openai_key,
     )
-
-    # Zero out our local reference — the BG task has its own copy
-    del openai_key
 
     steps = await _load_steps(task, db)
     return _task_to_response(task, steps)

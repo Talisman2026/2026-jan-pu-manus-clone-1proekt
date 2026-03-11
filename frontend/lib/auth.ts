@@ -1,22 +1,26 @@
-// JWT token is stored in memory (module-level) only.
-// The backend sets an httpOnly cookie for the refresh token.
-// Access token lives in memory so it survives page navigation within the same
-// browser tab session but is lost on hard refresh (user must log in again).
+// JWT token is stored in sessionStorage so it survives Next.js client-side
+// route navigation and soft refreshes within the same browser tab.
+// It is cleared when the tab is closed.
 
-let _token: string | null = null
+const SESSION_KEY = 'agentflow_token'
 
 export function getToken(): string | null {
-  return _token
+  if (typeof window === 'undefined') return null
+  return sessionStorage.getItem(SESSION_KEY)
 }
 
 export function setToken(token: string): void {
-  _token = token
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(SESSION_KEY, token)
+  }
 }
 
 export function clearToken(): void {
-  _token = null
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(SESSION_KEY)
+  }
 }
 
 export function isLoggedIn(): boolean {
-  return _token !== null
+  return getToken() !== null
 }

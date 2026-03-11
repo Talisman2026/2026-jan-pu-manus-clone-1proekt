@@ -124,13 +124,22 @@ export async function cancelTask(taskId: string): Promise<void> {
   return request<void>(`/tasks/${taskId}/cancel`, { method: 'POST' })
 }
 
-export function getTaskResultUrl(taskId: string): string {
+/**
+ * Download the task result file using the Authorization header (never in URL).
+ * Returns a temporary blob URL for programmatic download.
+ * Caller is responsible for revoking the URL with URL.revokeObjectURL().
+ */
+export async function downloadTaskResult(taskId: string): Promise<string> {
   const token = getToken()
-  const base = `${API_BASE}/tasks/${taskId}/result`
-  if (token) {
-    return `${base}?token=${encodeURIComponent(token)}`
+  const res = await fetch(`${API_BASE}/tasks/${taskId}/result`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    throw new ApiError(res.status, `Download failed: HTTP ${res.status}`)
   }
-  return base
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
 }
 
 export { ApiError }

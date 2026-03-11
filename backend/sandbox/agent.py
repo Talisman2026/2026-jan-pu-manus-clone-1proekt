@@ -576,13 +576,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="AgentFlow sandbox agent — runs inside E2B microVM"
     )
-    parser.add_argument("--task", required=True, help="Task description")
+    # --task-file is preferred (avoids shell injection); --task is kept for
+    # local testing convenience.
+    task_group = parser.add_mutually_exclusive_group(required=True)
+    task_group.add_argument("--task", help="Task description (inline, for local testing)")
+    task_group.add_argument("--task-file", help="Path to file containing the task description")
     parser.add_argument("--budget", type=float, required=True, help="Budget cap in USD")
     parser.add_argument("--task-id", required=True, help="Task ID for tracing")
     parsed = parser.parse_args()
 
+    if parsed.task_file:
+        with open(parsed.task_file, encoding="utf-8") as fh:
+            task_description = fh.read().strip()
+    else:
+        task_description = parsed.task
+
     main(
-        task_description=parsed.task,
+        task_description=task_description,
         budget_cap=parsed.budget,
         task_id=parsed.task_id,
     )

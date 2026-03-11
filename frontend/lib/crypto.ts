@@ -18,18 +18,19 @@ interface StoredKeyRecord {
   ciphertext: string  // hex-encoded
 }
 
-function bufferToHex(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf))
+function bufferToHex(buf: ArrayBuffer | Uint8Array): string {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+  return Array.from(u8)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
-function hexToBuffer(hex: string): Uint8Array {
+function hexToBuffer(hex: string): ArrayBuffer {
   const bytes = new Uint8Array(hex.length / 2)
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
   }
-  return bytes
+  return bytes.buffer as ArrayBuffer
 }
 
 async function openDB(): Promise<IDBDatabase> {
@@ -43,7 +44,7 @@ async function openDB(): Promise<IDBDatabase> {
   })
 }
 
-async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+async function deriveKey(password: string, salt: ArrayBuffer): Promise<CryptoKey> {
   const enc = new TextEncoder()
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -71,8 +72,10 @@ async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey>
  * The user's login password is used as the master password.
  */
 export async function saveKey(apiKey: string, password: string): Promise<void> {
-  const salt = crypto.getRandomValues(new Uint8Array(16))
-  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16))
+  const ivBytes = crypto.getRandomValues(new Uint8Array(12))
+  const salt = saltBytes.buffer as ArrayBuffer
+  const iv = ivBytes.buffer as ArrayBuffer
   const cryptoKey = await deriveKey(password, salt)
 
   const enc = new TextEncoder()
