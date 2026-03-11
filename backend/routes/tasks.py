@@ -17,6 +17,7 @@ from schemas import (
     ErrorResponse,
     EstimationResponse,
     TaskCreate,
+    TaskListItem,
     TaskResponse,
     TaskRunRequest,
     TaskStepResponse,
@@ -64,8 +65,7 @@ def _task_to_response(task: Task, steps: list[TaskStep]) -> TaskResponse:
         cost_actual=task.cost_actual,
         estimation=task.estimation,
         result_summary=task.result_summary,
-        result_file_path=task.result_file_path,
-        sandbox_id=task.sandbox_id,
+        has_result=bool(task.result_file_path),
         created_at=task.created_at,
         started_at=task.started_at,
         completed_at=task.completed_at,
@@ -84,6 +84,20 @@ def _task_to_response(task: Task, steps: list[TaskStep]) -> TaskResponse:
     )
 
 
+def _task_to_list_item(task: Task) -> TaskListItem:
+    return TaskListItem(
+        id=task.id,
+        description=task.description,
+        status=task.status,
+        budget_cap=task.budget_cap,
+        cost_actual=task.cost_actual,
+        has_result=bool(task.result_file_path),
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -91,22 +105,20 @@ def _task_to_response(task: Task, steps: list[TaskStep]) -> TaskResponse:
 
 @router.get(
     "",
-    response_model=list[TaskResponse],
+    response_model=list[TaskListItem],
 )
-async def list_tasks(current_user: CurrentUser, db: DbDep) -> list[TaskResponse]:
-    """Return all tasks for the authenticated user, newest first."""
+async def list_tasks(current_user: CurrentUser, db: DbDep) -> list[TaskListItem]:
+    """Return lightweight task summaries for the authenticated user, newest first.
+
+    Uses a single query — no N+1. Steps are omitted (use GET /tasks/{id} for those).
+    """
     result = await db.execute(
         select(Task)
         .where(Task.user_id == current_user.id)
         .order_by(Task.created_at.desc())
     )
     tasks = list(result.scalars().all())
-
-    output = []
-    for task in tasks:
-        steps = await _load_steps(task, db)
-        output.append(_task_to_response(task, steps))
-    return output
+    return [_task_to_list_item(task) for task in tasks]
 
 
 @router.post(

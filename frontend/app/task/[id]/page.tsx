@@ -193,7 +193,7 @@ export default function TaskPage({ params }: { params: Promise<{ id: string }> }
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-3">
-          {task.result_file_path && (
+          {task.has_result && (
             <Button variant="outline" loading={downloading} onClick={handleDownload}>
               Download Result
             </Button>

@@ -188,18 +188,32 @@ async def _run_agent(
         f"--task-id {shlex.quote(task_id)}"
     )
 
-    async for line in sandbox.commands.run_stream(cmd, timeout=1800):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            # Non-JSON output from agent (e.g. tracebacks); log safely
-            logger.debug("Non-JSON agent output for task_id=%s", task_id)
-            continue
+    async for chunk in sandbox.commands.run_stream(cmd, timeout=1800):
+        # E2B SDK yields ProcessOutput objects (not raw strings).
+        # Depending on SDK version the text is in .stdout, .text, or .line.
+        # We normalise here so the rest of the code only handles str lines.
+        raw_text: str = ""
+        if isinstance(chunk, str):
+            raw_text = chunk
+        elif hasattr(chunk, "stdout") and chunk.stdout:
+            raw_text = chunk.stdout
+        elif hasattr(chunk, "text") and chunk.text:
+            raw_text = chunk.text
+        elif hasattr(chunk, "line") and chunk.line:
+            raw_text = chunk.line
+        else:
+            continue  # stderr chunk or empty — skip
 
-        await _process_event(task_id, event, db)
+        for line in raw_text.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                logger.debug("Non-JSON agent output for task_id=%s", task_id)
+                continue
+            await _process_event(task_id, event, db)
 
 
 async def _process_event(
@@ -268,31 +282,51 @@ async def _download_result(
     sandbox: AsyncSandbox,
     db: AsyncSession,
 ) -> None:
-    """Download the first result file from the sandbox if it exists."""
+    """Download ALL result files from the sandbox if any exist.
+
+    The primary result (used for download) is the first non-partial file,
+    falling back to partial_results.md if that's all there is.
+    All files are saved to the host results directory.
+    """
     try:
         files = await sandbox.files.list(_RESULTS_DIR)
     except Exception:
-        # No results directory — that's fine
         return
 
     if not files:
         return
 
-    result_file = files[0]
-    content: bytes = await sandbox.files.read_bytes(result_file.path)
-
     host_results = Path(settings.RESULTS_DIR) / task_id
     host_results.mkdir(parents=True, exist_ok=True)
-    dest = host_results / result_file.name
-    dest.write_bytes(content)
 
-    await db.execute(
-        update(Task)
-        .where(Task.id == task_id)
-        .values(result_file_path=str(dest))
-    )
-    await db.commit()
-    logger.info("Result file saved for task_id=%s", task_id)
+    primary_path: Optional[Path] = None
+    for result_file in files:
+        try:
+            content: bytes = await sandbox.files.read_bytes(result_file.path)
+            dest = host_results / result_file.name
+            dest.write_bytes(content)
+            # Choose primary: prefer non-partial files; use first as fallback
+            if primary_path is None or result_file.name == "partial_results.md":
+                if primary_path is None:
+                    primary_path = dest
+            else:
+                primary_path = dest
+        except Exception as exc:
+            logger.warning(
+                "Could not download result file %s for task_id=%s: %s",
+                result_file.name,
+                task_id,
+                sanitize(str(exc)),
+            )
+
+    if primary_path is not None:
+        await db.execute(
+            update(Task)
+            .where(Task.id == task_id)
+            .values(result_file_path=str(primary_path))
+        )
+        await db.commit()
+        logger.info("Result files saved for task_id=%s", task_id)
 
 
 # ---------------------------------------------------------------------------

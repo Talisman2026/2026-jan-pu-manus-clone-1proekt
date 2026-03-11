@@ -43,8 +43,8 @@ export interface Task {
   cost_actual: number
   estimation: Estimation | null
   result_summary: string | null
-  result_file_path: string | null
-  sandbox_id: string | null
+  /** True when a result file is ready to download. */
+  has_result: boolean
   created_at: string
   started_at: string | null
   completed_at: string | null
@@ -57,7 +57,9 @@ export interface TaskListItem {
   status: TaskStatus
   budget_cap: number | null
   cost_actual: number
+  has_result: boolean
   created_at: string
+  started_at: string | null
   completed_at: string | null
 }
 

@@ -84,12 +84,29 @@ class TaskResponse(BaseModel):
     cost_actual: float
     estimation: Optional[dict[str, Any]]
     result_summary: Optional[str]
-    result_file_path: Optional[str]
-    sandbox_id: Optional[str]
+    # has_result replaces result_file_path — server filesystem paths are not
+    # safe to expose to clients (information disclosure).
+    has_result: bool = False
+    # sandbox_id is internal and never sent to clients.
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     steps: list[TaskStepResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class TaskListItem(BaseModel):
+    """Lightweight task summary for the list endpoint (no steps)."""
+    id: str
+    description: str
+    status: str
+    budget_cap: Optional[float]
+    cost_actual: float
+    has_result: bool = False
+    created_at: datetime
+    started_at: Optional[datetime]
+    completed_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
 
